@@ -9,18 +9,22 @@ class ThemeController {
   static final ValueNotifier<ThemeMode> mode =
   ValueNotifier<ThemeMode>(ThemeMode.light);
 
-  static get SharedPreferences => null;
-
   static Future<void> load() async {
-    final preferences = await SharedPreferences.getInstance();
-    final isDark = preferences.getBool(_key) ?? false;
-    mode.value = isDark ? ThemeMode.dark : ThemeMode.light;
+    try {
+      final preferences = await SharedPreferences.getInstance();
+      final isDark = preferences.getBool(_key) ?? false;
+      mode.value = isDark ? ThemeMode.dark : ThemeMode.light;
+    } catch (_) {
+      mode.value = ThemeMode.light;
+    }
   }
 
   static Future<void> setDarkMode(bool isDark) async {
     mode.value = isDark ? ThemeMode.dark : ThemeMode.light;
-    final preferences = await SharedPreferences.getInstance();
-    await preferences.setBool(_key, isDark);
+    try {
+      final preferences = await SharedPreferences.getInstance();
+      await preferences.setBool(_key, isDark);
+    } catch (_) {}
   }
 }
 
