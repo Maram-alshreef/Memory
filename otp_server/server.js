@@ -1,0 +1,142 @@
+require('dotenv').config();
+
+const crypto = require('crypto');
+const express = require('express');
+const cors = require('cors');
+const nodemailer = require('nodemailer');
+
+const app = express();
+const port = Number(process.env.PORT || 3000);
+const otpTtlMs = Number(process.env.OTP_TTL_MINUTES || 5) * 60 * 1000;
+const otpStore = new Map();
+
+app.use(cors());
+app.use(express.json());
+
+function normalizeEmail(value) {
+  return String(value || '').trim().toLowerCase();
+}
+
+function isValidEmail(email) {
+  return /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email);
+}
+
+function hashCode(code) {
+  return crypto.createHash('sha256').update(code).digest('hex');
+}
+
+function createCode() {
+  return String(crypto.randomInt(100000, 1000000));
+}
+
+function createTransporter() {
+  if (!process.env.GMAIL_USER || !process.env.GMAIL_APP_PASSWORD) {
+    throw new Error('إعدادات Gmail غير موجودة في ملف .env');
+  }
+
+  return nodemailer.createTransport({
+    service: 'gmail',
+    auth: {
+      user: process.env.GMAIL_USER,
+      pass: process.env.GMAIL_APP_PASSWORD.replace(/\s+/g, ''),
+    },
+  });
+}
+
+app.get('/health', (_req, res) => {
+  res.json({ ok: true, message: 'Memora OTP server is working' });
+});
+
+app.post('/otp/request', async (req, res) => {
+  const email = normalizeEmail(req.body.email);
+
+  if (!isValidEmail(email)) {
+    return res.status(400).json({
+      ok: false,
+      message: 'البريد الإلكتروني غير صحيح',
+    });
+  }
+
+  const code = createCode();
+  const expiresAt = Date.now() + otpTtlMs;
+  otpStore.set(email, {
+    codeHash: hashCode(code),
+    expiresAt,
+  });
+
+  try {
+    const transporter = createTransporter();
+
+    await transporter.sendMail({
+      from: `Memora <${process.env.GMAIL_USER}>`,
+      to: email,
+      subject: 'رمز استعادة كلمة المرور - Memora',
+      text: `رمز التحقق الخاص بك هو: ${code}\n\nالرمز صالح لمدة ${process.env.OTP_TTL_MINUTES || 5} دقائق. لا تشاركه مع أي شخص.`,
+      html: `
+        <div dir="rtl" style="font-family:Arial,sans-serif;line-height:1.8">
+          <h2>استعادة كلمة المرور - Memora</h2>
+          <p>رمز التحقق الخاص بك هو:</p>
+          <h1 style="letter-spacing:8px;color:#2E7D6E">${code}</h1>
+          <p>الرمز صالح لمدة ${process.env.OTP_TTL_MINUTES || 5} دقائق.</p>
+          <p>لا تشارك هذا الرمز مع أي شخص.</p>
+        </div>
+      `,
+    });
+
+    return res.json({
+      ok: true,
+      message: 'تم إرسال رمز التحقق إلى البريد الإلكتروني',
+    });
+  } catch (error) {
+    otpStore.delete(email);
+    console.error('OTP email error:', error.message);
+
+    return res.status(500).json({
+      ok: false,
+      message: 'تعذر إرسال البريد. تحقق من إعدادات Gmail وApp Password.',
+    });
+  }
+});
+
+app.post('/otp/verify', (req, res) => {
+  const email = normalizeEmail(req.body.email);
+  const code = String(req.body.code || '').trim();
+  const record = otpStore.get(email);
+
+  if (!record || Date.now() > record.expiresAt) {
+    otpStore.delete(email);
+
+    return res.status(400).json({
+      ok: false,
+      message: 'رمز التحقق منتهي أو غير موجود',
+    });
+  }
+
+  if (!/^\d{6}$/.test(code) || hashCode(code) !== record.codeHash) {
+    return res.status(400).json({
+      ok: false,
+      message: 'رمز التحقق غير صحيح',
+    });
+  }
+
+  otpStore.delete(email);
+
+  return res.json({
+    ok: true,
+    message: 'تم التحقق من الرمز بنجاح',
+  });
+});
+
+app.listen(port, '0.0.0.0', () => {
+  console.log(`Memora OTP server running on http://127.0.0.1:${port}`);
+});
+
+setInterval(() => {
+  const now = Date.now();
+
+  for (const [email, record] of otpStore.entries()) {
+    if (record.expiresAt <= now) {
+      otpStore.delete(email);
+    }
+  }
+}, 60 * 1000).unref();
