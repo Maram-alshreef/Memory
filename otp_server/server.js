@@ -7,7 +7,8 @@ const nodemailer = require('nodemailer');
 
 const app = express();
 const port = Number(process.env.PORT || 3000);
-const otpTtlMs = Number(process.env.OTP_TTL_MINUTES || 5) * 60 * 1000;
+const otpTtlMinutes = Number(process.env.OTP_TTL_MINUTES || 5);
+const otpTtlMs = otpTtlMinutes * 60 * 1000;
 const otpStore = new Map();
 
 app.use(cors());
@@ -31,7 +32,7 @@ function createCode() {
 
 function createTransporter() {
   if (!process.env.GMAIL_USER || !process.env.GMAIL_APP_PASSWORD) {
-    throw new Error('إعدادات Gmail غير موجودة في ملف .env');
+    throw new Error('إعدادات Gmail غير موجودة في متغيرات البيئة');
   }
 
   return nodemailer.createTransport({
@@ -42,6 +43,10 @@ function createTransporter() {
     },
   });
 }
+
+app.get('/', (_req, res) => {
+  res.json({ ok: true, message: 'Memora OTP server is running' });
+});
 
 app.get('/health', (_req, res) => {
   res.json({ ok: true, message: 'Memora OTP server is working' });
@@ -71,13 +76,13 @@ app.post('/otp/request', async (req, res) => {
       from: `Memora <${process.env.GMAIL_USER}>`,
       to: email,
       subject: 'رمز استعادة كلمة المرور - Memora',
-      text: `رمز التحقق الخاص بك هو: ${code}\n\nالرمز صالح لمدة ${process.env.OTP_TTL_MINUTES || 5} دقائق. لا تشاركه مع أي شخص.`,
+      text: `رمز التحقق الخاص بك هو: ${code}\n\nالرمز صالح لمدة ${otpTtlMinutes} دقائق. لا تشاركه مع أي شخص.`,
       html: `
         <div dir="rtl" style="font-family:Arial,sans-serif;line-height:1.8">
           <h2>استعادة كلمة المرور - Memora</h2>
           <p>رمز التحقق الخاص بك هو:</p>
           <h1 style="letter-spacing:8px;color:#2E7D6E">${code}</h1>
-          <p>الرمز صالح لمدة ${process.env.OTP_TTL_MINUTES || 5} دقائق.</p>
+          <p>الرمز صالح لمدة ${otpTtlMinutes} دقائق.</p>
           <p>لا تشارك هذا الرمز مع أي شخص.</p>
         </div>
       `,
@@ -89,7 +94,7 @@ app.post('/otp/request', async (req, res) => {
     });
   } catch (error) {
     otpStore.delete(email);
-    console.error('OTP email error:', error.message);
+console.error('OTP email error:', error);
 
     return res.status(500).json({
       ok: false,
@@ -105,7 +110,6 @@ app.post('/otp/verify', (req, res) => {
 
   if (!record || Date.now() > record.expiresAt) {
     otpStore.delete(email);
-
     return res.status(400).json({
       ok: false,
       message: 'رمز التحقق منتهي أو غير موجود',
@@ -120,7 +124,6 @@ app.post('/otp/verify', (req, res) => {
   }
 
   otpStore.delete(email);
-
   return res.json({
     ok: true,
     message: 'تم التحقق من الرمز بنجاح',
@@ -128,15 +131,12 @@ app.post('/otp/verify', (req, res) => {
 });
 
 app.listen(port, '0.0.0.0', () => {
-  console.log(`Memora OTP server running on http://127.0.0.1:${port}`);
+  console.log(`Memora OTP server listening on port ${port}`);
 });
 
 setInterval(() => {
   const now = Date.now();
-
   for (const [email, record] of otpStore.entries()) {
-    if (record.expiresAt <= now) {
-      otpStore.delete(email);
-    }
+    if (record.expiresAt <= now) otpStore.delete(email);
   }
 }, 60 * 1000).unref();

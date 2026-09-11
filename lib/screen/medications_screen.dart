@@ -15,8 +15,6 @@ class _MedicationsScreenState extends State<MedicationsScreen> {
   bool _isLoading = true;
 
   static const Color primaryGreen = Color(0xFF2E7D6E);
-  static const Color darkGreen = Color(0xFF1F5E53);
-  static const Color background = Color(0xFFF4FAF7);
 
   int get _takenCount => _medications.where((medication) => medication.isTaken).length;
 
@@ -39,7 +37,9 @@ class _MedicationsScreenState extends State<MedicationsScreen> {
     } catch (_) {
       if (!mounted) return;
       setState(() => _isLoading = false);
-      ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('تعذر تحميل الأدوية')));
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('تعذر تحميل الأدوية')),
+      );
     }
   }
 
@@ -61,13 +61,21 @@ class _MedicationsScreenState extends State<MedicationsScreen> {
         setState(() => _medications[_medications.indexOf(medication)] = result);
       }
     } catch (_) {
-      if (mounted) ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('تعذر حفظ الدواء')));
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text('تعذر حفظ الدواء')),
+        );
+      }
       return;
     }
 
     ScaffoldMessenger.of(context).showSnackBar(
       SnackBar(
-        content: Text(medication == null ? 'تمت إضافة الدواء بنجاح' : 'تم تعديل الدواء بنجاح'),
+        content: Text(
+          medication == null
+              ? 'تمت إضافة الدواء بنجاح'
+              : 'تم تعديل الدواء بنجاح',
+        ),
         backgroundColor: primaryGreen,
       ),
     );
@@ -80,7 +88,10 @@ class _MedicationsScreenState extends State<MedicationsScreen> {
         title: const Text('تأكيد الحذف'),
         content: Text('هل تريد حذف دواء «${medication.name}»؟'),
         actions: [
-          TextButton(onPressed: () => Navigator.pop(dialogContext, false), child: const Text('إلغاء')),
+          TextButton(
+            onPressed: () => Navigator.pop(dialogContext, false),
+            child: const Text('إلغاء'),
+          ),
           FilledButton(
             style: FilledButton.styleFrom(backgroundColor: Colors.redAccent),
             onPressed: () => Navigator.pop(dialogContext, true),
@@ -94,49 +105,85 @@ class _MedicationsScreenState extends State<MedicationsScreen> {
     try {
       await _database.deleteMedication(medication.id!);
       setState(() => _medications.remove(medication));
-      ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('تم حذف الدواء')));
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('تم حذف الدواء')),
+      );
     } catch (_) {
-      ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('تعذر حذف الدواء')));
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('تعذر حذف الدواء')),
+      );
     }
   }
 
   Future<void> _toggleTaken(Medication medication, bool value) async {
     try {
-      await _database.updateMedication(medication.id!, {'is_taken': value ? 1 : 0});
+      await _database.updateMedication(
+        medication.id!,
+        {'is_taken': value ? 1 : 0},
+      );
       setState(() => medication.isTaken = value);
     } catch (_) {
-      if (mounted) ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('تعذر تحديث حالة الدواء')));
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text('تعذر تحديث حالة الدواء')),
+        );
+      }
       return;
     }
     ScaffoldMessenger.of(context).showSnackBar(
-      SnackBar(content: Text(value ? 'تم تسجيل تناول الدواء' : 'تمت إعادة الدواء إلى القائمة')),
+      SnackBar(
+        content: Text(
+          value ? 'تم تسجيل تناول الدواء' : 'تمت إعادة الدواء إلى القائمة',
+        ),
+      ),
     );
   }
 
   @override
   Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    final scheme = theme.colorScheme;
+
     return Directionality(
       textDirection: TextDirection.rtl,
       child: Scaffold(
-        backgroundColor: background,
+        backgroundColor: theme.scaffoldBackgroundColor,
         appBar: AppBar(
           title: const Text('الأدوية والتذكيرات'),
           centerTitle: true,
           backgroundColor: Colors.transparent,
-          foregroundColor: darkGreen,
+          foregroundColor: scheme.primary,
           elevation: 0,
         ),
         body: ListView(
           padding: const EdgeInsets.fromLTRB(20, 8, 20, 90),
           children: [
-            if (_isLoading) const Padding(padding: EdgeInsets.all(30), child: Center(child: CircularProgressIndicator())) else ...[
+            if (_isLoading)
+              const Padding(
+                padding: EdgeInsets.all(30),
+                child: Center(child: CircularProgressIndicator()),
+              )
+            else ...[
               _buildSummaryCard(),
               const SizedBox(height: 22),
               Row(
                 mainAxisAlignment: MainAxisAlignment.spaceBetween,
                 children: [
-                  const Text('قائمة الأدوية', style: TextStyle(fontSize: 21, fontWeight: FontWeight.bold, color: darkGreen)),
-                  Text('${_medications.length} أدوية', style: const TextStyle(color: primaryGreen, fontWeight: FontWeight.w600)),
+                  Text(
+                    'قائمة الأدوية',
+                    style: TextStyle(
+                      fontSize: 21,
+                      fontWeight: FontWeight.bold,
+                      color: scheme.onSurface,
+                    ),
+                  ),
+                  Text(
+                    '${_medications.length} أدوية',
+                    style: const TextStyle(
+                      color: primaryGreen,
+                      fontWeight: FontWeight.w600,
+                    ),
+                  ),
                 ],
               ),
               const SizedBox(height: 12),
@@ -168,16 +215,30 @@ class _MedicationsScreenState extends State<MedicationsScreen> {
             const CircleAvatar(
               radius: 30,
               backgroundColor: Colors.white24,
-              child: Icon(Icons.medication_rounded, color: Colors.white, size: 32),
+              child: Icon(
+                Icons.medication_rounded,
+                color: Colors.white,
+                size: 32,
+              ),
             ),
             const SizedBox(width: 16),
             Expanded(
               child: Column(
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
-                  const Text('متابعة أدوية اليوم', style: TextStyle(color: Colors.white, fontSize: 19, fontWeight: FontWeight.bold)),
+                  const Text(
+                    'متابعة أدوية اليوم',
+                    style: TextStyle(
+                      color: Colors.white,
+                      fontSize: 19,
+                      fontWeight: FontWeight.bold,
+                    ),
+                  ),
                   const SizedBox(height: 5),
-                  Text('تم تناول $_takenCount من ${_medications.length}', style: const TextStyle(color: Colors.white70)),
+                  Text(
+                    'تم تناول $_takenCount من ${_medications.length}',
+                    style: const TextStyle(color: Colors.white70),
+                  ),
                 ],
               ),
             ),
@@ -193,10 +254,13 @@ class _MedicationsScreenState extends State<MedicationsScreen> {
   }
 
   Widget _buildMedicationCard(Medication medication) {
+    final theme = Theme.of(context);
+    final scheme = theme.colorScheme;
+
     return Card(
       elevation: 0,
       margin: const EdgeInsets.only(bottom: 12),
-      color: Colors.white,
+      color: theme.cardColor,
       shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(18)),
       child: Padding(
         padding: const EdgeInsets.all(12),
@@ -204,7 +268,9 @@ class _MedicationsScreenState extends State<MedicationsScreen> {
           children: [
             CircleAvatar(
               radius: 27,
-              backgroundColor: medication.isTaken ? const Color(0xFFD8EEE7) : const Color(0xFFEFF6F3),
+              backgroundColor: medication.isTaken
+                  ? scheme.secondaryContainer
+                  : scheme.surfaceContainerHighest,
               child: Icon(medication.icon, color: primaryGreen),
             ),
             const SizedBox(width: 12),
@@ -212,22 +278,62 @@ class _MedicationsScreenState extends State<MedicationsScreen> {
               child: Column(
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
-                  Text(medication.name, style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold, color: darkGreen, decoration: medication.isTaken ? TextDecoration.lineThrough : null)),
+                  Text(
+                    medication.name,
+                    style: TextStyle(
+                      fontSize: 16,
+                      fontWeight: FontWeight.bold,
+                      color: scheme.onSurface,
+                      decoration: medication.isTaken
+                          ? TextDecoration.lineThrough
+                          : null,
+                    ),
+                  ),
                   const SizedBox(height: 5),
-                  Text('${medication.dose} • ${medication.time}', style: const TextStyle(color: Color(0xFF42645D), fontSize: 13)),
+                  Text(
+                    '${medication.dose} • ${medication.time}',
+                    style: TextStyle(
+                      color: scheme.onSurfaceVariant,
+                      fontSize: 13,
+                    ),
+                  ),
                   const SizedBox(height: 5),
-                  Text(medication.isTaken ? 'تم التناول' : 'لم يتم التناول بعد', style: TextStyle(color: medication.isTaken ? primaryGreen : Colors.orange.shade700, fontSize: 12, fontWeight: FontWeight.w600)),
+                  Text(
+                    medication.isTaken
+                        ? 'تم التناول'
+                        : 'لم يتم التناول بعد',
+                    style: TextStyle(
+                      color: medication.isTaken
+                          ? primaryGreen
+                          : Colors.orange.shade700,
+                      fontSize: 12,
+                      fontWeight: FontWeight.w600,
+                    ),
+                  ),
                 ],
               ),
             ),
             Column(
               children: [
-                Switch(value: medication.isTaken, activeThumbColor: primaryGreen, onChanged: (value) => _toggleTaken(medication, value)),
+                Switch(
+                  value: medication.isTaken,
+                  activeThumbColor: primaryGreen,
+                  onChanged: (value) => _toggleTaken(medication, value),
+                ),
                 Row(
                   mainAxisSize: MainAxisSize.min,
                   children: [
-                    IconButton(icon: const Icon(Icons.edit_outlined, size: 20), color: primaryGreen, onPressed: () => _openMedicationForm(medication: medication)),
-                    IconButton(icon: const Icon(Icons.delete_outline, size: 20), color: Colors.redAccent, onPressed: () => _deleteMedication(medication)),
+                    IconButton(
+                      icon: const Icon(Icons.edit_outlined, size: 20),
+                      color: primaryGreen,
+                      onPressed: () =>
+                          _openMedicationForm(medication: medication),
+                    ),
+                    IconButton(
+                      icon: const Icon(Icons.delete_outline, size: 20),
+                      color: Colors.redAccent,
+                      onPressed: () => _deleteMedication(medication),
+                    ),
                   ],
                 ),
               ],
@@ -239,12 +345,29 @@ class _MedicationsScreenState extends State<MedicationsScreen> {
   }
 
   Widget _buildEmptyState() {
+    final theme = Theme.of(context);
+
     return Card(
       elevation: 0,
-      color: Colors.white,
+      color: theme.cardColor,
       child: Padding(
         padding: const EdgeInsets.all(30),
-        child: Column(children: [const Icon(Icons.medication_outlined, size: 54, color: primaryGreen), const SizedBox(height: 12), const Text('لا توجد أدوية مضافة بعد'), const SizedBox(height: 6), const Text('اضغط على إضافة دواء للبدء', style: TextStyle(color: Colors.grey))]),
+        child: Column(
+          children: [
+            const Icon(
+              Icons.medication_outlined,
+              size: 54,
+              color: primaryGreen,
+            ),
+            const SizedBox(height: 12),
+            const Text('لا توجد أدوية مضافة بعد'),
+            const SizedBox(height: 6),
+            Text(
+              'اضغط على إضافة دواء للبدء',
+              style: TextStyle(color: theme.colorScheme.onSurfaceVariant),
+            ),
+          ],
+        ),
       ),
     );
   }
@@ -281,7 +404,8 @@ class _MedicationFormDialogState extends State<MedicationFormDialog> {
     super.dispose();
   }
 
-  String? _required(String? value) => value == null || value.trim().isEmpty ? 'هذا الحقل مطلوب' : null;
+  String? _required(String? value) =>
+      value == null || value.trim().isEmpty ? 'هذا الحقل مطلوب' : null;
 
   void _save() {
     if (!_formKey.currentState!.validate()) return;
@@ -310,15 +434,39 @@ class _MedicationFormDialogState extends State<MedicationFormDialog> {
             child: Column(
               mainAxisSize: MainAxisSize.min,
               children: [
-                TextFormField(controller: _nameController, decoration: const InputDecoration(labelText: 'اسم الدواء', prefixIcon: Icon(Icons.medication_outlined)), validator: _required),
-                TextFormField(controller: _doseController, decoration: const InputDecoration(labelText: 'الجرعة', prefixIcon: Icon(Icons.format_list_numbered)), validator: _required),
-                TextFormField(controller: _timeController, decoration: const InputDecoration(labelText: 'وقت التناول', prefixIcon: Icon(Icons.access_time)), validator: _required),
+                TextFormField(
+                  controller: _nameController,
+                  decoration: const InputDecoration(
+                    labelText: 'اسم الدواء',
+                    prefixIcon: Icon(Icons.medication_outlined),
+                  ),
+                  validator: _required,
+                ),
+                TextFormField(
+                  controller: _doseController,
+                  decoration: const InputDecoration(
+                    labelText: 'الجرعة',
+                    prefixIcon: Icon(Icons.format_list_numbered),
+                  ),
+                  validator: _required,
+                ),
+                TextFormField(
+                  controller: _timeController,
+                  decoration: const InputDecoration(
+                    labelText: 'وقت التناول',
+                    prefixIcon: Icon(Icons.access_time),
+                  ),
+                  validator: _required,
+                ),
               ],
             ),
           ),
         ),
         actions: [
-          TextButton(onPressed: () => Navigator.pop(context), child: const Text('إلغاء')),
+          TextButton(
+            onPressed: () => Navigator.pop(context),
+            child: const Text('إلغاء'),
+          ),
           FilledButton(onPressed: _save, child: const Text('حفظ')),
         ],
       ),
@@ -334,11 +482,30 @@ class Medication {
   IconData icon;
   bool isTaken;
 
-  Medication({this.id, required this.name, required this.dose, required this.time, required this.icon, this.isTaken = false});
+  Medication({
+    this.id,
+    required this.name,
+    required this.dose,
+    required this.time,
+    required this.icon,
+    this.isTaken = false,
+  });
 
   factory Medication.fromMap(Map<String, Object?> map) {
-    return Medication(id: map['id'] as int?, name: map['name'] as String, dose: map['dose'] as String, time: map['time'] as String, icon: Icons.medication_rounded, isTaken: (map['is_taken'] as int? ?? 0) == 1);
+    return Medication(
+      id: map['id'] as int?,
+      name: map['name'] as String,
+      dose: map['dose'] as String,
+      time: map['time'] as String,
+      icon: Icons.medication_rounded,
+      isTaken: (map['is_taken'] as int? ?? 0) == 1,
+    );
   }
 
-  Map<String, Object?> toMap() => {'name': name, 'dose': dose, 'time': time, 'is_taken': isTaken ? 1 : 0};
+  Map<String, Object?> toMap() => {
+    'name': name,
+    'dose': dose,
+    'time': time,
+    'is_taken': isTaken ? 1 : 0,
+  };
 }
