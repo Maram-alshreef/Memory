@@ -1,19 +1,16 @@
 require('dotenv').config();
 
-const crypto = require('crypto');
 const express = require('express');
 const cors = require('cors');
+const crypto = require('crypto');
 
 const app = express();
-const port = Number(process.env.PORT || 3000);
-const otpTtlMinutes = Number(process.env.OTP_TTL_MINUTES || 5);
-const otpTtlMs = otpTtlMinutes * 60 * 1000;
-const otpStore = new Map();
-
-const VERSION = 'resend-2026-09-11-v2';
 
 app.use(cors());
 app.use(express.json());
+
+const PORT = process.env.PORT || 3000;
+const otpStore = new Map();
 
 function normalizeEmail(value) {
   return String(value || '').trim().toLowerCase();
@@ -23,181 +20,287 @@ function isValidEmail(email) {
   return /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email);
 }
 
-function hashCode(code) {
-  return crypto.createHash('sha256').update(code).digest('hex');
-}
-
-function createCode() {
+function generateOtp() {
   return String(crypto.randomInt(100000, 1000000));
 }
 
-function getErrorMessage(error) {
-  if (error && typeof error.message === 'string') return error.message;
-  return String(error || 'Unknown error');
+function hashValue(value) {
+  return crypto
+    .createHash('sha256')
+    .update(String(value))
+    .digest('hex');
 }
 
-app.get('/', (_req, res) => {
+function createResetToken() {
+  return crypto.randomBytes(32).toString('hex');
+}
+
+function escapeHtml(value) {
+  return String(value)
+    .replaceAll('&', '&amp;')
+    .replaceAll('<', '&lt;')
+    .replaceAll('>', '&gt;')
+    .replaceAll('"', '&quot;')
+    .replaceAll("'", '&#039;');
+}
+
+function createOtpEmail(otp) {
+  return `
+    <!DOCTYPE html>
+    <html lang="ar" dir="rtl">
+      <head>
+        <meta charset="UTF-8">
+        <title>رمز التحقق</title>
+      </head>
+      <body style="font-family: Arial, sans-serif; direction: rtl;">
+        <h2>My OTP App</h2>
+        <p>رمز التحقق الخاص بك هو:</p>
+
+        <div style="
+          font-size: 32px;
+          font-weight: bold;
+          letter-spacing: 8px;
+          color: #2563eb;
+          margin: 24px 0;
+        ">
+          ${escapeHtml(otp)}
+        </div>
+
+        <p>صلاحية الرمز خمس دقائق.</p>
+        <p>إذا لم تطلب إعادة تعيين كلمة المرور، فتجاهل هذه الرسالة.</p>
+      </body>
+    </html>
+  `;
+}
+
+async function sendOtpEmail({ email, otp }) {
+  const apiKey = process.env.BREVO_API_KEY;
+  const senderEmail = process.env.MAIL_FROM;
+  const senderName = process.env.MAIL_FROM_NAME || 'My OTP App';
+
+  if (!apiKey) {
+    throw new Error('BREVO_API_KEY غير موجود');
+  }
+
+  if (!senderEmail) {
+    throw new Error('MAIL_FROM غير موجود');
+  }
+
+  const response = await fetch('https://api.brevo.com/v3/smtp/email', {
+    method: 'POST',
+    headers: {
+      accept: 'application/json',
+      'api-key': apiKey,
+      'content-type': 'application/json',
+    },
+    body: JSON.stringify({
+      sender: {
+        name: senderName,
+        email: senderEmail,
+      },
+      to: [
+        {
+          email,
+        },
+      ],
+      subject: 'رمز التحقق',
+      htmlContent: createOtpEmail(otp),
+    }),
+  });
+
+  if (!response.ok) {
+    const errorText = await response.text();
+    throw new Error(`Brevo API error ${response.status}: ${errorText}`);
+  }
+
+  return response.json();
+}
+
+app.get('/', (req, res) => {
   res.json({
-    ok: true,
-    version: VERSION,
-    message: 'Memora OTP server is running',
+    success: true,
+    message: 'Backend يعمل',
   });
 });
 
-app.get('/health', (_req, res) => {
-  res.json({
-    ok: true,
-    version: VERSION,
-    message: 'Memora OTP server is working',
+app.post('/auth/send-otp', async (req, res) => {
+  try {
+    const email = normalizeEmail(req.body.email);
+
+    if (!isValidEmail(email)) {
+      return res.status(400).json({
+        success: false,
+        message: 'البريد الإلكتروني غير صحيح',
+      });
+    }
+
+    const oldRequest = otpStore.get(email);
+
+    if (
+      oldRequest &&
+      Date.now() - oldRequest.createdAt < 60 * 1000
+    ) {
+      return res.status(429).json({
+        success: false,
+        message: 'انتظر دقيقة قبل طلب رمز جديد',
+      });
+    }
+
+    const otp = generateOtp();
+
+    await sendOtpEmail({
+      email,
+      otp,
+    });
+
+    otpStore.set(email, {
+      otpHash: hashValue(otp),
+      createdAt: Date.now(),
+      expiresAt: Date.now() + 5 * 60 * 1000,
+      attempts: 0,
+      verified: false,
+      resetToken: null,
+      resetTokenExpiresAt: null,
+    });
+
+    return res.json({
+      success: true,
+      message: 'تم إرسال رمز التحقق إلى بريدك الإلكتروني',
+    });
+  } catch (error) {
+    console.error('Brevo send error:', error.message);
+
+    return res.status(500).json({
+      success: false,
+      message: 'تعذر إرسال رمز التحقق',
+    });
+  }
+});
+
+app.post('/auth/verify-otp', (req, res) => {
+  const email = normalizeEmail(req.body.email);
+  const otp = String(req.body.otp || '').trim();
+
+
+
+  if (!isValidEmail(email) || !/^\d{6}$/.test(otp)) {
+    return res.status(400).json({
+      success: false,
+      message: 'بيانات التحقق غير صحيحة',
+    });
+  }
+
+  const record = otpStore.get(email);
+
+  if (!record) {
+    return res.status(400).json({
+      success: false,
+      message: 'لا يوجد رمز تحقق نشط',
+    });
+  }
+
+  if (Date.now() > record.expiresAt) {
+    otpStore.delete(email);
+
+    return res.status(400).json({
+      success: false,
+      message: 'انتهت صلاحية رمز التحقق',
+    });
+  }
+
+  if (record.attempts >= 5) {
+    otpStore.delete(email);
+
+    return res.status(429).json({
+      success: false,
+      message: 'تم تجاوز عدد المحاولات المسموح بها',
+    });
+  }
+
+  record.attempts += 1;
+
+  if (hashValue(otp) !== record.otpHash) {
+    return res.status(400).json({
+      success: false,
+      message: 'رمز التحقق غير صحيح',
+    });
+  }
+
+  const resetToken = createResetToken();
+
+  record.verified = true;
+  record.resetToken = resetToken;
+  record.resetTokenExpiresAt = Date.now() + 10 * 60 * 1000;
+
+  return res.json({
+    success: true,
+    message: 'تم التحقق من الرمز بنجاح',
+    resetToken,
   });
 });
 
-app.post('/otp/request', async (req, res) => {
-  const email = normalizeEmail(req.body?.email);
-
-  console.log(`[${VERSION}] OTP request received for: ${email}`);
+app.post('/auth/reset-password', (req, res) => {
+  const email = normalizeEmail(req.body.email);
+  const resetToken = String(req.body.resetToken || '').trim();
+  const newPassword = String(req.body.newPassword || '');
 
   if (!isValidEmail(email)) {
     return res.status(400).json({
-      ok: false,
+      success: false,
       message: 'البريد الإلكتروني غير صحيح',
     });
   }
 
-  if (!process.env.RESEND_API_KEY) {
-    console.error('RESEND_API_KEY is missing');
-    return res.status(500).json({
-      ok: false,
-      message: 'إعدادات خدمة البريد غير مكتملة على الخادم',
+  if (resetToken.length < 20) {
+    return res.status(400).json({
+      success: false,
+      message: 'رمز إعادة التعيين غير صحيح',
     });
   }
 
-  const code = createCode();
-  const expiresAt = Date.now() + otpTtlMs;
-
-  otpStore.set(email, {
-    codeHash: hashCode(code),
-    expiresAt,
-  });
-
-  const controller = new AbortController();
-  const timeout = setTimeout(() => controller.abort(), 15000);
-
-  try {
-    console.log('Sending OTP through Resend API...');
-
-    const resendResponse = await fetch('https://api.resend.com/emails', {
-      method: 'POST',
-      headers: {
-        Authorization: `Bearer ${process.env.RESEND_API_KEY}`,
-        'Content-Type': 'application/json',
-      },
-      body: JSON.stringify({
-        // للاختبار الأول استخدم عنوان Resend الافتراضي.
-        // عند توثيق نطاقك في Resend، استبدله بعنوان من نطاقك الموثق.
-    from: 'Memora <onboarding@resend.dev>',
-           to: [email],
-        subject: 'رمز استعادة كلمة المرور - Memora',
-        text: `رمز التحقق الخاص بك هو: ${code}\n\nالرمز صالح لمدة ${otpTtlMinutes} دقائق. لا تشاركه مع أي شخص.`,
-        html: `
-          <div dir="rtl" style="font-family:Arial,sans-serif;line-height:1.8">
-            <h2>استعادة كلمة المرور - Memora</h2>
-            <p>رمز التحقق الخاص بك هو:</p>
-            <h1 style="letter-spacing:8px;color:#2E7D6E">${code}</h1>
-            <p>الرمز صالح لمدة ${otpTtlMinutes} دقائق.</p>
-            <p>لا تشارك هذا الرمز مع أي شخص.</p>
-          </div>
-        `,
-      }),
-      signal: controller.signal,
+  if (newPassword.length < 8) {
+    return res.status(400).json({
+      success: false,
+      message: 'كلمة المرور يجب أن تكون 8 أحرف على الأقل',
     });
-
-    const responseText = await resendResponse.text();
-    let resendResult = {};
-
-    try {
-      resendResult = responseText ? JSON.parse(responseText) : {};
-    } catch (_) {
-      resendResult = { raw: responseText };
-    }
-
-    if (!resendResponse.ok) {
-      const apiMessage =
-        resendResult.message ||
-        resendResult.error?.message ||
-        `Resend returned HTTP ${resendResponse.status}`;
-
-      throw new Error(apiMessage);
-    }
-
-    console.log('OTP email sent successfully. Resend ID:', resendResult.id || 'unknown');
-
-    return res.json({
-      ok: true,
-      version: VERSION,
-      message: 'تم إرسال رمز التحقق إلى البريد الإلكتروني',
-    });
-  } catch (error) {
-    otpStore.delete(email);
-
-    const message = error?.name === 'AbortError'
-      ? 'انتهت مهلة الاتصال بخدمة البريد'
-      : getErrorMessage(error);
-
-    console.error('OTP email error:', message);
-
-    return res.status(500).json({
-      ok: false,
-      message: `تعذر إرسال رمز التحقق: ${message}`,
-    });
-  } finally {
-    clearTimeout(timeout);
   }
-});
 
-app.post('/otp/verify', (req, res) => {
-  const email = normalizeEmail(req.body?.email);
-  const code = String(req.body?.code || '').trim();
   const record = otpStore.get(email);
 
-  console.log(`[${VERSION}] OTP verification received for: ${email}`);
-
-  if (!record || Date.now() > record.expiresAt) {
-    otpStore.delete(email);
-
-    return res.status(400).json({
-      ok: false,
-      message: 'رمز التحقق منتهي أو غير موجود',
+  if (!record || !record.verified) {
+    return res.status(403).json({
+      success: false,
+      message: 'يجب التحقق من رمز OTP أولًا',
     });
   }
 
-  if (!/^\d{6}$/.test(code) || hashCode(code) !== record.codeHash) {
+  if (
+    !record.resetTokenExpiresAt ||
+    Date.now() > record.resetTokenExpiresAt
+  ) {
+    otpStore.delete(email);
+
     return res.status(400).json({
-      ok: false,
-      message: 'رمز التحقق غير صحيح',
+      success: false,
+      message: 'انتهت صلاحية جلسة إعادة التعيين',
+    });
+  }
+
+  if (record.resetToken !== resetToken) {
+    return res.status(403).json({
+      success: false,
+      message: 'رمز إعادة التعيين غير صحيح',
     });
   }
 
   otpStore.delete(email);
 
   return res.json({
-    ok: true,
-    version: VERSION,
-    message: 'تم التحقق من الرمز بنجاح',
+    success: true,
+    message: 'تم تغيير كلمة المرور بنجاح',
   });
 });
 
-app.listen(port, '0.0.0.0', () => {
-  console.log(`Memora OTP server listening on port ${port}`);
-  console.log(`Version: ${VERSION}`);
+app.listen(PORT, '0.0.0.0', () => {
+  console.log(`Backend يعمل على المنفذ ${PORT}`);
 });
-
-setInterval(() => {
-  const now = Date.now();
-
-  for (const [email, record] of otpStore.entries()) {
-    if (record.expiresAt <= now) {
-      otpStore.delete(email);
-    }
-  }
-}, 60 * 1000).unref();
