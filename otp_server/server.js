@@ -95,7 +95,7 @@ app.post('/otp/request', async (req, res) => {
       body: JSON.stringify({
         // للاختبار الأول استخدم عنوان Resend الافتراضي.
         // عند توثيق نطاقك في Resend، استبدله بعنوان من نطاقك الموثق.
-        from: 'Memora <onboarding@resend.dev>',
+        from: 'Memora <no-reply@memora-app.com>',
         to: [email],
         subject: 'رمز استعادة كلمة المرور - Memora',
         text: `رمز التحقق الخاص بك هو: ${code}\n\nالرمز صالح لمدة ${otpTtlMinutes} دقائق. لا تشاركه مع أي شخص.`,
