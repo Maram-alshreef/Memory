@@ -1,15 +1,21 @@
+```js
 require('dotenv').config();
 
 const crypto = require('crypto');
 const express = require('express');
 const cors = require('cors');
-const nodemailer = require('nodemailer');
+const { Resend } = require('resend');
 
 const app = express();
 const port = Number(process.env.PORT || 3000);
+
 const otpTtlMinutes = Number(process.env.OTP_TTL_MINUTES || 5);
 const otpTtlMs = otpTtlMinutes * 60 * 1000;
+
 const otpStore = new Map();
+
+// Resend
+const resend = new Resend(process.env.RESEND_API_KEY);
 
 app.use(cors());
 app.use(express.json());
@@ -30,30 +36,24 @@ function createCode() {
   return String(crypto.randomInt(100000, 1000000));
 }
 
-function createTransporter() {
-  if (!process.env.GMAIL_USER || !process.env.GMAIL_APP_PASSWORD) {
-    throw new Error('إعدادات Gmail غير موجودة في متغيرات البيئة');
-  }
-
-  return nodemailer.createTransport({
-    service: 'gmail',
-    auth: {
-      user: process.env.GMAIL_USER,
-      pass: process.env.GMAIL_APP_PASSWORD.replace(/\s+/g, ''),
-    },
-  });
-}
-
 app.get('/', (_req, res) => {
-  res.json({ ok: true, message: 'Memora OTP server is running' });
+  res.json({
+    ok: true,
+    message: 'Memora OTP server is running',
+  });
 });
 
 app.get('/health', (_req, res) => {
-  res.json({ ok: true, message: 'Memora OTP server is working' });
+  res.json({
+    ok: true,
+    message: 'Memora OTP server is working',
+  });
 });
 
 app.post('/otp/request', async (req, res) => {
   const email = normalizeEmail(req.body.email);
+
+  console.log('OTP request received:', email);
 
   if (!isValidEmail(email)) {
     return res.status(400).json({
@@ -64,29 +64,47 @@ app.post('/otp/request', async (req, res) => {
 
   const code = createCode();
   const expiresAt = Date.now() + otpTtlMs;
+
   otpStore.set(email, {
     codeHash: hashCode(code),
     expiresAt,
   });
 
   try {
-    const transporter = createTransporter();
+    console.log('Sending OTP using Resend...');
 
-    await transporter.sendMail({
-      from: `Memora <${process.env.GMAIL_USER}>`,
-      to: email,
+    const { data, error } = await resend.emails.send({
+      from: 'Memora <onboarding@resend.dev>',
+      to: [email],
       subject: 'رمز استعادة كلمة المرور - Memora',
       text: `رمز التحقق الخاص بك هو: ${code}\n\nالرمز صالح لمدة ${otpTtlMinutes} دقائق. لا تشاركه مع أي شخص.`,
       html: `
         <div dir="rtl" style="font-family:Arial,sans-serif;line-height:1.8">
           <h2>استعادة كلمة المرور - Memora</h2>
+
           <p>رمز التحقق الخاص بك هو:</p>
-          <h1 style="letter-spacing:8px;color:#2E7D6E">${code}</h1>
-          <p>الرمز صالح لمدة ${otpTtlMinutes} دقائق.</p>
-          <p>لا تشارك هذا الرمز مع أي شخص.</p>
+
+          <h1 style="letter-spacing:8px;color:#2E7D6E">
+            ${code}
+          </h1>
+
+          <p>
+            الرمز صالح لمدة ${otpTtlMinutes} دقائق.
+          </p>
+
+          <p>
+            لا تشارك هذا الرمز مع أي شخص.
+          </p>
         </div>
       `,
     });
+
+    if (error) {
+      throw new Error(error.message || 'Resend email error');
+    }
+
+    console.log('OTP email sent successfully');
+    console.log('Resend email ID:', data?.id);
 
     return res.json({
       ok: true,
@@ -94,11 +112,12 @@ app.post('/otp/request', async (req, res) => {
     });
   } catch (error) {
     otpStore.delete(email);
-console.error('OTP email error:', error);
+
+    console.error('OTP email error:', error);
 
     return res.status(500).json({
       ok: false,
-      message: 'تعذر إرسال البريد. تحقق من إعدادات Gmail وApp Password.',
+      message: 'تعذر إرسال رمز التحقق، حاول مرة أخرى',
     });
   }
 });
@@ -106,10 +125,12 @@ console.error('OTP email error:', error);
 app.post('/otp/verify', (req, res) => {
   const email = normalizeEmail(req.body.email);
   const code = String(req.body.code || '').trim();
+
   const record = otpStore.get(email);
 
   if (!record || Date.now() > record.expiresAt) {
     otpStore.delete(email);
+
     return res.status(400).json({
       ok: false,
       message: 'رمز التحقق منتهي أو غير موجود',
@@ -124,6 +145,7 @@ app.post('/otp/verify', (req, res) => {
   }
 
   otpStore.delete(email);
+
   return res.json({
     ok: true,
     message: 'تم التحقق من الرمز بنجاح',
@@ -136,7 +158,11 @@ app.listen(port, '0.0.0.0', () => {
 
 setInterval(() => {
   const now = Date.now();
+
   for (const [email, record] of otpStore.entries()) {
-    if (record.expiresAt <= now) otpStore.delete(email);
+    if (record.expiresAt <= now) {
+      otpStore.delete(email);
+    }
   }
 }, 60 * 1000).unref();
+```
